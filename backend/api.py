@@ -188,7 +188,8 @@ def _init_db():
     print('======================================================')
     print('  ✅ Oasis 已經準備好了！')
     print('')
-    print('  請打開瀏覽器，前往：https://oasis.fusion-labs.cc')
+    portal_url = f'https://{host}:{port}' if os.environ.get('OASIS_SELF_HOSTED') == '1' else 'https://oasis.fusion-labs.cc'
+    print(f'  請打開瀏覽器，前往：{portal_url}')
     print('  這個視窗請保持開啟——關閉視窗會讓播放和下載功能一起停止。')
     print('======================================================')
     print('')

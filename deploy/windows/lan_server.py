@@ -14,6 +14,8 @@ os.environ.update({
     'DB_PATH': str(DATA / 'oasis.db'), 'OASIS_MEDIA_ROOT': str(DATA),
     'HOST': CONFIG['host'], 'PORT': str(CONFIG['port']),
     'OASIS_TRUST_LOOPBACK': '0',
+    'OASIS_SELF_HOSTED': '1',
+    'OASIS_ENABLE_TRANSLATION': '0',
     'ALLOWED_ORIGINS': f"https://{CONFIG['host']}:{CONFIG['port']}",
     'OASIS_CHROME_PATH': str(ROOT / 'runtime/chrome/chrome-win64/chrome.exe'),
     'TEMP': str(DATA / 'temp'), 'TMP': str(DATA / 'temp'),
@@ -82,7 +84,7 @@ def main():
         import windows_limits
         windows_limits.limit_job(memory_bytes=2 * 1024**3, processes=128)
     node_env = dict(os.environ, HOSTNAME='127.0.0.1', PORT=str(CONFIG['frontend_port']),
-        NEXT_TELEMETRY_DISABLED='1', NODE_ENV='production')
+        NEXT_TELEMETRY_DISABLED='1', NODE_ENV='production', OASIS_LAN_BUILD='1')
     frontend_log = open(ROOT / 'logs/frontend.log', 'ab')
     node = subprocess.Popen([str(ROOT / 'runtime/node.exe'), str(ROOT / 'frontend/server.js')],
         cwd=ROOT / 'frontend', env=node_env, stdout=frontend_log, stderr=frontend_log,

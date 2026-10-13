@@ -69,7 +69,7 @@ try {
     & $python -X utf8 (Join-Path $target 'initialize_lan.py') --root $target --host $ListenAddress --port $Port
     if ($LASTEXITCODE -ne 0) { throw 'Credential and certificate initialization failed.' }
     # A scheduled task stores its generated credential in Windows, never a text file.
-    $arguments = '-X utf8 -u "' + (Join-Path $target 'lan_server.py') + '"'
+    $arguments = '-B -X utf8 -u "' + (Join-Path $target 'lan_server.py') + '"'
     $action = New-ScheduledTaskAction -Execute $python -Argument $arguments -WorkingDirectory $target
     $trigger = New-ScheduledTaskTrigger -AtStartup
     $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
