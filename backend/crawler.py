@@ -1,8 +1,8 @@
 import os
 import re
 import threading
-import requests
-from requests.adapters import HTTPAdapter
+import safe_http as requests
+from safe_http import HTTPAdapter
 from urllib3.util.retry import Retry
 from config import headers as default_headers
 from functools import partial

@@ -210,6 +210,10 @@ def translate_to_zh_tw(text: str, attempts: int = TRANSLATE_ATTEMPTS) -> str:
     expensive to redo for a one-second network blip. Returns the text untouched
     when every attempt fails, so the caller stores the original rather than an
     error page."""
+    # Translation sends private catalog titles to a third party. The LAN bundle
+    # keeps it off and does not install an external translation provider.
+    if os.environ.get('OASIS_ENABLE_TRANSLATION') != '1':
+        return text or ''
     if not text:
         return ''
     import time
@@ -701,49 +705,45 @@ _COVER_MAX_BYTES = 15 * 1024 * 1024
 
 
 def fetch_cover_image(url: str, referer: str | None = None) -> tuple[bytes, str] | None:
-    """Download a cover image's raw bytes + MIME type from its origin URL."""
-    url = (url or '').strip()
+    """Cache only decoded/re-encoded raster images from public destinations."""
+    import io
+    import warnings
+    from PIL import Image
+    import safe_http
 
-    # If URL is a local video stream endpoint, fetch bytes directly from DB
-    m = re.search(r'/api/stream/cover/(\d+)', url)
-    if m:
-        v_src = get_cover_source(int(m.group(1)))
-        if v_src and v_src['data']:
-            return bytes(v_src['data']), v_src['mime'] or 'image/jpeg'
-        if v_src and v_src['cover_url'] and not ('127.0.0.1' in v_src['cover_url'] or 'localhost' in v_src['cover_url']):
-            url = v_src['cover_url']
-
-    if not url.lower().startswith(('http://', 'https://')):
+    if not url or not url.lower().startswith(('http://', 'https://')):
         return None
-
-    # Refuse loopback HTTP requests to backend itself to prevent deadlock
-    if '127.0.0.1' in url or 'localhost' in url:
-        return None
-
     try:
-        import requests
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                          'AppleWebKit/537.36 (KHTML, like Gecko) '
-                          'Chrome/120.0.0.0 Safari/537.36',
-        }
+        headers = {'User-Agent': 'Oasis', 'Accept-Encoding': 'identity'}
         if referer:
             headers['Referer'] = referer
-        resp = requests.get(url, headers=headers, timeout=15, stream=True)
-        resp.raise_for_status()
-        ctype = (resp.headers.get('Content-Type') or '').split(';')[0].strip().lower()
-        if not ctype.startswith('image/'):
-            return None
-        data = bytearray()
-        for chunk in resp.iter_content(64 * 1024):
-            data.extend(chunk)
-            if len(data) > _COVER_MAX_BYTES:
+        with safe_http.get(url, headers=headers, timeout=15, stream=True) as resp:
+            resp.raise_for_status()
+            mime = resp.headers.get('Content-Type', '').split(';')[0].strip().lower()
+            if mime not in {'image/jpeg', 'image/png', 'image/webp', 'image/gif'}:
                 return None
-        if not data:
-            return None
-        return bytes(data), ctype
+            if resp.headers.get('Content-Encoding', 'identity').lower() != 'identity':
+                return None
+            data = bytearray()
+            for chunk in resp.iter_content(64 * 1024):
+                data.extend(chunk)
+                if len(data) > _COVER_MAX_BYTES:
+                    return None
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(data)) as image:
+                if image.format not in {'JPEG', 'PNG', 'WEBP', 'GIF'}:
+                    return None
+                if image.width * image.height > 20_000_000:
+                    return None
+                image.load()
+                output = io.BytesIO()
+                image.convert('RGB').save(output, format='JPEG', quality=90)
+                result = output.getvalue()
+                return (result, 'image/jpeg') if len(result) <= _COVER_MAX_BYTES else None
     except Exception:
         return None
+
 
 
 def store_cover_image(video_id: int, data: bytes, mime: str):
@@ -883,7 +883,6 @@ def _start_scrape_driver(adapter: dict):
     from site_config import setup_driver_for_site
 
     options = Options()
-    options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-extensions')
     options.add_argument('--headless')

@@ -98,7 +98,6 @@ export default function OasisGate() {
   const attempted = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const hiddenInputRef = useRef<HTMLInputElement>(null);
-  const [inputFocused, setInputFocused] = useState(false);
 
   // Reachable, but it won't have us: either it wants an access code we don't
   // hold, or it has none set and refuses us for not being its own machine.
@@ -221,7 +220,7 @@ export default function OasisGate() {
   }
 
   function handleAccessCodeChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const raw = e.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 8);
+    const raw = e.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 26);
     setCodeDraft(raw);
   }
 
@@ -400,66 +399,22 @@ export default function OasisGate() {
                   type="text"
                   value={codeDraft}
                   onChange={handleAccessCodeChange}
-                  onFocus={() => setInputFocused(true)}
-                  onBlur={() => setInputFocused(false)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && codeDraft.length === 8) enterCode();
+                    if (e.key === "Enter" && [8, 26].includes(codeDraft.length)) enterCode();
                   }}
-                  maxLength={8}
-                  className="sr-only"
+                  maxLength={64}
+                  aria-label="存取碼"
+                  placeholder="貼上本機顯示的存取碼"
+                  className="w-full rounded-lg border border-white/20 bg-white/[0.06] px-3 py-3 font-mono text-sm tracking-wider text-white outline-none focus:border-[#7aa2ff]"
                   autoComplete="off"
+                  autoCapitalize="characters"
                   spellCheck={false}
                 />
-
-                <div
-                  onClick={() => hiddenInputRef.current?.focus()}
-                  className="flex items-center justify-center gap-1.5 cursor-text py-1"
-                >
-                  {[0, 1, 2, 3].map((index) => {
-                    const char = codeDraft[index] || "";
-                    const isActive = inputFocused && (codeDraft.length === index || (index === 7 && codeDraft.length === 8));
-                    return (
-                      <div
-                        key={index}
-                        className={`w-9 h-11 rounded-lg border flex items-center justify-center font-mono text-lg font-bold transition-all duration-200 ${
-                          isActive
-                            ? "border-[#7aa2ff] bg-white/[0.08] text-white shadow-[0_0_10px_rgba(122,162,255,0.4)]"
-                            : char
-                            ? "border-white/20 bg-white/[0.06] text-white"
-                            : "border-white/10 bg-white/[0.02] text-white/20"
-                        }`}
-                      >
-                        {char}
-                      </div>
-                    );
-                  })}
-
-                  <span className="mx-1 text-lg font-bold text-white/30">-</span>
-
-                  {[4, 5, 6, 7].map((index) => {
-                    const char = codeDraft[index] || "";
-                    const isActive = inputFocused && (codeDraft.length === index || (index === 7 && codeDraft.length === 8));
-                    return (
-                      <div
-                        key={index}
-                        className={`w-9 h-11 rounded-lg border flex items-center justify-center font-mono text-lg font-bold transition-all duration-200 ${
-                          isActive
-                            ? "border-[#7aa2ff] bg-white/[0.08] text-white shadow-[0_0_10px_rgba(122,162,255,0.4)]"
-                            : char
-                            ? "border-white/20 bg-white/[0.06] text-white"
-                            : "border-white/10 bg-white/[0.02] text-white/20"
-                        }`}
-                      >
-                        {char}
-                      </div>
-                    );
-                  })}
-                </div>
 
                 <button
                   type="button"
                   onClick={enterCode}
-                  disabled={submitting || codeDraft.length < 8}
+                  disabled={submitting || ![8, 26].includes(codeDraft.length)}
                   className="w-full rounded-lg bg-gradient-to-r from-[#4be1ff] to-[#a78bfa] py-2.5 text-sm font-bold text-[#050510] transition hover:brightness-110 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {submitting ? "驗證中…" : "進入"}
@@ -472,7 +427,7 @@ export default function OasisGate() {
                 </p>
               ) : (
                 <p className="mt-3 text-left text-xs leading-relaxed text-white/30">
-                  存取碼顯示在執行綠洲那台電腦的主控台視窗上。此裝置只需輸入一次。
+                  請在執行綠洲的電腦使用本機管理工具查看存取碼，再貼到這裡。此裝置只需輸入一次。
                 </p>
               )}
               <button

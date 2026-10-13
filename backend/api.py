@@ -19,7 +19,7 @@ import webbrowser
 import re
 import time
 import urllib.parse
-import requests
+import safe_http as requests
 
 from fastapi import FastAPI, HTTPException, Request, Depends, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse, JSONResponse, Response, RedirectResponse
@@ -41,7 +41,7 @@ import db_setup
 import site_config
 import version
 
-app = FastAPI(title='OASIS API')
+app = FastAPI(title='OASIS API', docs_url=None, redoc_url=None, openapi_url=None)
 
 # The frontend is a public website that calls this local backend directly from
 # the browser, so only allow the deployed site's origin (plus localhost for dev).
@@ -81,23 +81,10 @@ CLIENT_HEADER = 'x-oasis-client'
 # require one.
 _OPEN_PATHS = {'/api/health', '/api/auth/login'}
 
-# Refused for anyone not physically at this machine, *even with the right code*.
-# These two reach out of the browser and touch the desktop — one launches a player
-# on the owner's screen, the other pushes code onto their PC — so a leaked code
-# must not be enough to fire them.
-#
-# The remote-access switch (/api/auth/remote) is deliberately *not* here, even
-# though it manages the code. The backend cannot tell the owner browsing through
-# their own tunnel URL from a phone on that tunnel — both arrive with proxy
-# headers — so keeping the switch local-only meant the settings page was dead
-# whenever the portal pointed at anything but localhost, which is a normal way to
-# use this thing. Nothing is given away by allowing it: the one attack that
-# mattered — a stranger finding an unclaimed tunnel URL and turning remote access
-# on to claim the backend — is impossible regardless, because with the switch off
-# no remote caller is authorized and the endpoint is never reached. What a leaked
-# code now also buys is turning remote access off, or rotating it: an annoyance,
-# recoverable at the machine, and no escalation.
-_LOCAL_ONLY_PATHS = ('/api/update/apply',)
+# Desktop, update and credential management are console-only in hardened mode.
+# Loopback compatibility trust is an explicit opt-in, never enabled by the LAN
+# launcher; a bearer code by itself cannot reach these endpoints.
+_LOCAL_ONLY_PATHS = ('/api/update/apply', '/api/auth/remote', '/api/auth/reveal')
 _LOCAL_ONLY_SUFFIXES = ('/open',)
 
 
@@ -132,9 +119,8 @@ async def require_auth(request: Request, call_next):
     if not path.startswith('/api/stream/') and request.headers.get(CLIENT_HEADER) != '1':
         return JSONResponse(status_code=403, content={'detail': '缺少 Oasis 用戶端標頭'})
 
-    # This machine is the backend's owner and is always in: the code exists only
-    # to let *other* devices reach it. Resolved once here — /api/health reports it
-    # back, and the local-only endpoints below re-use it.
+    # Hardened defaults require the code for all clients. Optional loopback
+    # compatibility trust must not be enabled behind a proxy or TCP forwarder.
     local = auth.is_local_request(request)
     code_set = auth.has_code()
     authorized = local
@@ -202,7 +188,8 @@ def _init_db():
     print('======================================================')
     print('  ✅ Oasis 已經準備好了！')
     print('')
-    print('  請打開瀏覽器，前往：https://oasis.fusion-labs.cc')
+    portal_url = f'https://{host}:{port}' if os.environ.get('OASIS_SELF_HOSTED') == '1' else 'https://oasis.fusion-labs.cc'
+    print(f'  請打開瀏覽器，前往：{portal_url}')
     print('  這個視窗請保持開啟——關閉視窗會讓播放和下載功能一起停止。')
     print('======================================================')
     print('')
@@ -223,9 +210,14 @@ def _init_db():
     db_setup.create_tables()
     # The console is the only place the code is ever shown, so print it on every
     # start: that is where the user goes to read it off.
-    auth.print_code()
     if not auth.has_code():
-        print('   若要用手機看片，請在「設定 → 遠端存取」開啟遠端存取。')
+        auth.enable()
+    if not auth.has_code():
+        raise RuntimeError('無法保存存取碼，拒絕啟動服務')
+    if os.environ.get('OASIS_SELF_HOSTED') == '1':
+        print('   存取碼請在本機使用管理工具查看，不寫入服務日誌。')
+    else:
+        auth.print_code()
     _resume_pending_downloads()
     asyncio.create_task(_bg_check_analyses())
     asyncio.create_task(_backfill_covers())
@@ -826,6 +818,14 @@ async def analyze(req: AnalyzeRequest):
             "error": item.get("error")
         }
 
+    if sum(item['status'] == 'analyzing' for item in active_analyses.values()) >= 2:
+        raise HTTPException(status_code=429, detail='同時最多分析兩個網址')
+    if len(active_analyses) >= 512:
+        for old_id, item in list(active_analyses.items()):
+            if item['status'] != 'analyzing':
+                active_analyses.pop(old_id, None)
+                break
+
     result_queue = multiprocessing.Queue()
     proc = multiprocessing.Process(
         target=_analyze_worker,
@@ -1386,15 +1386,15 @@ def stream_cover(video_id: int):
             data, mime = fetched
             catalog.store_cover_image(video_id, data, mime)
 
-    if data is None:
+    if data is None or mime not in {'image/jpeg', 'image/png', 'image/webp', 'image/gif'}:
         raise HTTPException(status_code=404, detail='封面不存在')
 
     return Response(
         content=bytes(data),
         media_type=mime or 'image/jpeg',
-        # Bytes are immutable once cached (editing the cover URL clears them), so
-        # let the browser cache aggressively instead of re-hitting the backend.
-        headers={'Cache-Control': 'public, max-age=31536000, immutable'},
+        # Private images must not survive access revocation in shared caches.
+        headers={'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',
+                 'Content-Security-Policy': "default-src 'none'; sandbox"},
     )
 
 
@@ -1416,15 +1416,13 @@ def stream_series_cover(series_id: int):
             if series_rec and series_rec.get('cover') == src['cover_url']:
                 catalog.store_series_cover_image(series_id, data, mime)
 
-    if data:
+    if data and mime in {'image/jpeg', 'image/png', 'image/webp', 'image/gif'}:
         return Response(
             content=bytes(data),
             media_type=mime or 'image/jpeg',
-            headers={'Cache-Control': 'public, max-age=31536000, immutable'},
+            headers={'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',
+                 'Content-Security-Policy': "default-src 'none'; sandbox"},
         )
-
-    if src['cover_url'] and src['cover_url'].lower().startswith(('http://', 'https://')):
-        return RedirectResponse(url=src['cover_url'])
 
     raise HTTPException(status_code=404, detail='封面不存在')
 
@@ -1477,7 +1475,7 @@ def stream_online_video(video_id: int, request: Request):
 
     url = record['url']
 
-    if 'anime1.me' in url.lower():
+    if (urllib.parse.urlsplit(url).hostname or '').lower() in {'anime1.me', 'www.anime1.me'}:
         now = time.time()
         cached = _anime1_stream_cache.get(video_id)
         if cached and cached.get('expiry', 0) > now:
