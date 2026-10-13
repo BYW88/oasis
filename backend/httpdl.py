@@ -8,8 +8,8 @@ a single streaming GET, resumable by byte range.
 
 import os
 
-import requests
-from requests.adapters import HTTPAdapter
+import safe_http as requests
+from safe_http import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from crawler import is_stop_requested, reset_stop

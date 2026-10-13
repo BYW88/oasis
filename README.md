@@ -1,5 +1,7 @@
 # 🎬 Oasis (綠洲) - 個人謎片管理中心
 
+> **本分支的安全加固版本**：預設本機與遠端都需存取碼，網頁不能執行自動更新或桌面管理操作，自動翻譯預設關閉。Windows 私人區網的免 Docker 部署方式請看 [部署說明](deploy/windows/README.md)。請勿用上游自動更新覆蓋本分支修補。
+
 <p align="center">
   <a href="https://github.com/fusion-labs-cc/oasis/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/fusion-labs-cc/oasis?style=flat-square&label=release&color=ff5263" /></a>
   <a href="https://github.com/fusion-labs-cc/oasis/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/fusion-labs-cc/oasis/total?style=flat-square&label=downloads&color=2ea44f" /></a>

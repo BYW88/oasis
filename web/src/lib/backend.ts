@@ -18,6 +18,9 @@ export function getBackendUrl(): string {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     if (stored) return normalize(stored);
   }
+  if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_SELF_HOSTED === "1") {
+    return window.location.origin;
+  }
   return normalize(DEFAULT_BACKEND_URL);
 }
 

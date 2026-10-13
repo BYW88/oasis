@@ -1,5 +1,5 @@
 
-import requests
+import safe_http as requests
 import os
 import re
 import m3u8
@@ -50,7 +50,7 @@ def download(url, progress_cb=None):
   adapter = detect_site(url)
 
   # 建立影片資料夾（movies/ 位於 repo root，即 backend 的上一層）
-  media_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+  media_root = os.environ.get('OASIS_MEDIA_ROOT') or os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
   movies_folder = os.path.join(media_root, 'movies')
   if not os.path.exists(movies_folder):
       os.makedirs(movies_folder)
@@ -67,7 +67,6 @@ def download(url, progress_cb=None):
 
   #配置Selenium參數
   options = Options()
-  options.add_argument('--no-sandbox')
   options.add_argument('--disable-dev-shm-usage')
   options.add_argument('--disable-extensions')
   options.add_argument('--headless')

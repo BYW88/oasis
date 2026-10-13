@@ -466,7 +466,7 @@ def get_media_source(driver, adapter: dict, page_url: str = ''):
     post = cfg.get('post') or {}
     cookies: dict = {}
     if post.get('url'):
-        import requests as req
+        import safe_http as req
 
         post_headers = dict(headers)
         for key, value in (post.get('headers') or {}).items():
@@ -509,7 +509,7 @@ def resolve_m3u8_to_stream(m3u8url, request_headers):
     resolve it to the highest quality stream playlist URL.
     If it's already a stream playlist (contains segments), return as-is.
     """
-    import requests as req
+    import safe_http as req
     import m3u8 as m3u8lib
 
     response = req.get(m3u8url, headers=request_headers, timeout=15)
@@ -544,6 +544,8 @@ def build_ts_url(seg_uri, download_base_url):
 
 def setup_driver_for_site(options, adapter: dict):
     """Apply the adapter's Selenium driver options."""
+    if os.environ.get('OASIS_CHROME_PATH'):
+        options.binary_location = os.environ['OASIS_CHROME_PATH']
     driver_cfg = adapter.get('driver', {})
     if driver_cfg.get('performance_log'):
         options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})

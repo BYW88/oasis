@@ -121,23 +121,7 @@ function Field({
 const inputClass =
   "w-full sm:w-64 rounded-lg border border-border-hairline bg-surface-highest px-3 py-2 text-sm text-text-primary placeholder-text-tertiary outline-none transition focus:border-accent/50";
 
-/**
- * Remote access — one switch, and the code it mints.
- *
- * Off (the default), the backend is local-only: its own machine needs no
- * credential and every non-local caller is refused outright, so tunnelling a
- * backend whose switch is off leaks nothing. On, the backend generates a code and
- * prints it to *its own console window* — this page never shows it, which is why a
- * settings page left open on a shared screen gives nothing away, and why "forgot
- * it" is answered by printing it again rather than displaying it here.
- *
- * Not gated on `local`, deliberately. The backend cannot tell the owner browsing
- * through their own tunnel URL from a phone on that tunnel, so a local-only switch
- * would be dead exactly when the portal points at anything but localhost — a
- * normal way to run this. Turning remote access *on* is still unreachable from
- * outside (with the switch off, no remote caller is authorized at all), so an
- * unclaimed backend cannot be claimed by a stranger who found its URL.
- */
+// Hardened deployments manage credentials on the host, outside the web UI.
 function RemoteAccessSection() {
   const toast = useToast();
   const { codeSet, local, ping, backendUrl } = useBackend();
@@ -266,7 +250,7 @@ function RemoteAccessSection() {
         title="開放其他裝置連線"
         description={
           codeSet
-            ? "已開啟：其他裝置（例如透過 ngrok 之類的通道連進來的手機）輸入存取碼後即可使用。存取碼只會顯示在後端的主控台視窗，不會出現在這個頁面上。執行綠洲的那台電腦本身不需要存取碼。"
+            ? "已啟用存取碼保護，本機與其他裝置都需要驗證。安全部署的開關及存取碼由執行綠洲的電腦管理，無法從此頁變更。"
             : "目前僅限本機使用：任何來自其他裝置的連線都會被拒絕。開啟後，後端會產生一組存取碼並顯示在它的主控台視窗上，用手機等裝置連進來時輸入即可。"
         }
       >
@@ -275,7 +259,7 @@ function RemoteAccessSection() {
           role="switch"
           aria-checked={codeSet}
           onClick={toggle}
-          disabled={busy}
+          disabled={busy || !local}
           className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition cursor-pointer disabled:opacity-40 ${
             codeSet ? "bg-accent" : "bg-surface-highest border border-border-hairline"
           }`}
@@ -295,13 +279,13 @@ function RemoteAccessSection() {
             description={
               local
                 ? "把目前的存取碼重新印在後端的主控台視窗上。若要換一組新的，把上面的開關關掉再打開即可——舊的存取碼會立刻失效，所有已連線的裝置都必須重新輸入。"
-                : "把目前的存取碼重新印在後端的主控台視窗上——也就是執行綠洲的那台電腦，你在這台裝置上看不到。若要換一組新的，把上面的開關關掉再打開即可，但你這台裝置也會跟著斷線。"
+                : "請在執行綠洲的電腦使用本機管理工具查看存取碼。本頁不會顯示或變更存取碼。"
             }
           >
             <button
               type="button"
               onClick={reveal}
-              disabled={busy}
+              disabled={busy || !local}
               className="rounded-lg border border-border-hairline px-3 py-2 text-xs font-semibold text-text-secondary transition hover:bg-surface-highest disabled:opacity-40 cursor-pointer"
             >
               在主控台顯示存取碼

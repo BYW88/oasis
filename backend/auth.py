@@ -1,54 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Access code for remote use of the local backend.
+"""Credential-based access for local and LAN clients.
 
-Why this exists: the CORS allowlist and the X-Oasis-Client header are *browser*
-guards. They stop a random website the user visits from calling their localhost,
-but they are worth nothing against a plain HTTP client — `curl -H 'X-Oasis-Client: 1'`
-sails straight through both. That is fine while the backend only listens on
-127.0.0.1, and it is a full compromise the moment the user tunnels it (ngrok,
-cloudflared, …) so they can watch from their phone: anyone with the URL could
-read the catalog, delete files, launch a player on the user's desktop, or trigger
-a self-update.
-
-The model, in one line: **this machine is always trusted; remote access is a
-switch, and the switch mints a code.**
-
-  * **Remote access off (the default).** Requests from this machine need no
-    credential at all — double-click and go — and every non-local request is
-    refused outright. There is nothing to configure and nothing to leak, so
-    tunnelling an un-configured backend exposes nothing.
-  * **Remote access on.** The backend *generates* a random code and prints it to
-    its own console window. Remote devices must present it; this machine still
-    needs nothing. Turning the switch off deletes the code, which is also how
-    every paired device is cut off at once.
-
-The code being machine-generated (not a user's password) is what lets the rest
-be so small. It is unique to this backend and reused nowhere, so it is stored in
-plain text — which is the whole point: the owner can ask for it to be printed
-again when they forget it. And because it is already a high-entropy random
-string, it *is* the bearer credential: there are no sessions to mint, track or
-revoke, and `<video src>` (which can carry a credential only as a query param)
-simply carries the code. Rotating it is "switch off, switch on".
-
-`is_local_request()` decides who is trusted, and it is about where the *request*
-came from, not where the page did: almost every user runs the public website
-(oasis.fusion-labs.cc) against their own localhost backend, so the browser that
-manages this backend is nearly always showing a page served from somewhere else.
-The peer socket is what tells them apart, and all three of its checks earn their
-place:
-
-  * **A loopback peer.** Necessary, and on its own useless: a tunnel agent runs on
-    the user's own machine and so also connects from 127.0.0.1.
-  * **No `X-Forwarded-*`/proxy header.** What catches an HTTP tunnel (ngrok,
-    cloudflared): it injects them, and a client on the far side cannot strip them.
-  * **A loopback `Host`.** What catches a tunnel that injects *nothing* — `ssh -R`,
-    `ngrok tcp`, Tailscale Funnel. Those pass the client's own Host straight
-    through, and a phone reaching this backend through a tunnel asked for the
-    tunnel's domain, whereas a browser on this machine can only have been pointed
-    at localhost. Without this check such a forward hands out full local trust
-    along with the port — the code becomes decorative, and a remote device can
-    launch a player on the owner's desktop.
+Loopback peers and Host headers are not identity: TCP forwarders can make a
+remote request look local. By default every caller needs the generated code,
+and desktop/update/auth-management HTTP endpoints are unavailable. An explicit
+OASIS_TRUST_LOOPBACK=1 is only for deployments with no loopback forwarding.
+The hardened Windows launcher never enables that compatibility option.
 """
 
 import hmac
@@ -83,10 +41,9 @@ _LOCAL_HOST_NAMES = {'localhost', '0.0.0.0'}
 
 # The code is read off a console window and typed into a phone, so the alphabet
 # drops the characters people mistake for each other (I/1, O/0) and the code is
-# grouped for legibility. 8 chars over 32 symbols = 40 bits — unguessable at the
-# handful of tries per minute the throttle below allows.
+# grouped for legibility. 26 random characters provide over 128 bits of entropy.
 _ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-_CODE_LEN = 8
+_CODE_LEN = 26
 _GROUP = 4
 
 # Brute-force throttle. Counted only against a *wrong* code: a request with no
@@ -135,7 +92,7 @@ def normalize(code: str | None) -> str:
     """Canonical form of a code as typed: grouping and case are cosmetic."""
     if not code:
         return ''
-    return ''.join(c for c in code.upper() if c.isalnum())
+    return ''.join(c for c in code.upper() if c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')
 
 
 def get_code() -> str | None:
@@ -186,8 +143,8 @@ def print_code() -> None:
     print(f'\n{rule}')
     print('🔐 遠端存取已開啟')
     print(f'   存取碼： {code}')
-    print('   其他裝置連線時需輸入此存取碼（本機不需要）。')
-    print('   忘記了可到「設定 → 遠端存取」再顯示一次。')
+    print('   本機與其他裝置連線時都需輸入此存取碼。')
+    print('   忘記時請在本機使用管理工具查看。')
     print(f'{rule}\n')
 
 
@@ -198,12 +155,8 @@ def print_code() -> None:
 def _host_is_local(request) -> bool:
     """True when the caller addressed this backend *as* localhost.
 
-    The one thing a forwarder cannot fake on the client's behalf. A phone reaching
-    the backend through a tunnel asks for the tunnel's domain, so that is the Host
-    its browser sends; a browser on this machine can only ever have been pointed at
-    localhost / 127.0.0.1. Header-less forwarders (ssh -R, `ngrok tcp`, Tailscale
-    Funnel) pass the client's Host straight through, which is exactly what gives
-    them away — the peer socket and the proxy headers do not.
+    Host is client-controlled. This is only a compatibility filter and cannot
+    authenticate a remote caller behind a TCP forwarder.
     """
     host = request.headers.get('host', '').strip()
     if not host:
@@ -222,12 +175,13 @@ def _host_is_local(request) -> bool:
 
 
 def is_local_request(request) -> bool:
-    """True only for a request that physically originated on this machine.
+    """Optional compatibility trust, disabled by default.
 
-    All three of: a loopback peer, no forwarding header, and a loopback Host. Each
-    covers what the others miss — see the module docstring, and _host_is_local for
-    why the Host is the half that catches a tunnel adding no headers at all.
+    Enable only when there are no loopback proxies or port forwarders. The
+    hardened LAN deployment requires credentials even from a loopback peer.
     """
+    if os.environ.get('OASIS_TRUST_LOOPBACK') != '1':
+        return False
     if any(h in request.headers for h in _PROXY_HEADERS):
         return False
     if not _host_is_local(request):
@@ -242,21 +196,13 @@ def is_local_request(request) -> bool:
 
 
 def client_key(request) -> str:
-    """Throttle key: the real caller, as best we can tell.
+    """Use the actual peer; untrusted forwarding headers cannot pick a bucket.
 
-    Behind a tunnel every request arrives from 127.0.0.1, so the peer address
-    alone would lump all remote attackers into one bucket (and the owner with
-    them). The tunnel appends the true client to X-Forwarded-For, so the
-    *rightmost* entry — the one our nearest proxy wrote, not one the client made
-    up — identifies them.
+    A proxy shares a bucket until a trusted-proxy policy is implemented.
     """
-    xff = request.headers.get('x-forwarded-for')
-    if xff:
-        parts = [p.strip() for p in xff.split(',') if p.strip()]
-        if parts:
-            return parts[-1]
     client = request.client
     return client.host if client and client.host else 'unknown'
+
 
 
 def lockout_remaining(key: str) -> int:
@@ -271,7 +217,14 @@ def lockout_remaining(key: str) -> int:
 
 def register_failure(key: str) -> None:
     """Count a wrong access code and extend the lockout once past the limit."""
-    count = _failures.get(key, (0, 0.0))[0] + 1
+    now = time.time()
+    if len(_failures) >= 4096:
+        for old_key, (_, until) in list(_failures.items()):
+            if until + 3600 < now:
+                _failures.pop(old_key, None)
+        if key not in _failures and len(_failures) >= 4096:
+            _failures.pop(next(iter(_failures)))
+    count = min(_failures.get(key, (0, 0.0))[0] + 1, 32)
     if count > _FAIL_LIMIT:
         backoff = min(_LOCK_BASE_S * (2 ** (count - _FAIL_LIMIT - 1)), _LOCK_MAX_S)
         until = time.time() + backoff
