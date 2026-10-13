@@ -16,11 +16,14 @@ import safe_http
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, request):
     monkeypatch.delenv('OASIS_TRUST_LOOPBACK', raising=False)
     monkeypatch.setattr(auth, 'AUTH_PATH', str(tmp_path / 'auth.json'))
     monkeypatch.setattr(catalog, 'DB_PATH', str(tmp_path / 'catalog.db'))
     monkeypatch.setattr(api.db_setup, 'DB_PATH', str(tmp_path / 'catalog.db'))
+    if getattr(request, 'param', False):
+        monkeypatch.setenv('OASIS_SELF_HOSTED', '1')
+        monkeypatch.setattr(auth, 'print_code', lambda: pytest.fail('Service startup must not log the access code'))
     auth._failures.clear()
     with TestClient(api.app, base_url='http://localhost:8000', client=('127.0.0.1', 12345)) as client:
         yield client
@@ -153,3 +156,9 @@ def test_translation_is_local_by_default(monkeypatch):
 def test_non_ascii_code_fails_without_server_error(client):
     response = client.post('/api/auth/login', headers={'X-Oasis-Client': '1'}, json={'code': '测试'})
     assert response.status_code == 401
+
+
+@pytest.mark.parametrize('client', [True], indirect=True)
+def test_self_hosted_startup_does_not_log_code(client):
+    assert auth.has_code()
+    assert client.get('/api/health', headers={'X-Oasis-Client': '1'}).status_code == 200

@@ -44,7 +44,7 @@ try {
     foreach ($name in @('app','frontend','runtime')) {
         Copy-Item -LiteralPath (Join-Path $bundle $name) -Destination (Join-Path $target $name) -Recurse
     }
-    foreach ($name in @('lan_server.py','windows_limits.py','initialize_lan.py','show-access-code.ps1','rotate-access-code.ps1','stop-lan.ps1')) {
+    foreach ($name in @('lan_server.py','service_entry.py','windows_limits.py','initialize_lan.py','show-access-code.ps1','rotate-access-code.ps1','stop-lan.ps1')) {
         Copy-Item -LiteralPath (Join-Path $bundle $name) -Destination (Join-Path $target $name)
     }
     foreach ($name in @('data','logs','data\temp')) { New-Item -ItemType Directory -Path (Join-Path $target $name) -Force | Out-Null }
@@ -58,6 +58,7 @@ try {
     $usersGroup = Get-LocalGroup -SID 'S-1-5-32-545'
     Add-LocalGroupMember -Group $usersGroup -Member $user -ErrorAction SilentlyContinue
     $serviceSid = $user.SID.Value
+    & (Join-Path $PSScriptRoot 'grant-batch-logon.ps1') -AccountSid $serviceSid
     # Use SIDs to work on both localized and English Windows installations.
     & icacls.exe $target /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' "*${OwnerSid}:(OI)(CI)RX" "*${serviceSid}:(OI)(CI)RX" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to restrict installation permissions.' }
@@ -69,11 +70,12 @@ try {
     & $python -X utf8 (Join-Path $target 'initialize_lan.py') --root $target --host $ListenAddress --port $Port
     if ($LASTEXITCODE -ne 0) { throw 'Credential and certificate initialization failed.' }
     # A scheduled task stores its generated credential in Windows, never a text file.
-    $arguments = '-B -X utf8 -u "' + (Join-Path $target 'lan_server.py') + '"'
+    $arguments = '-B -X utf8 -u "' + (Join-Path $target 'service_entry.py') + '"'
     $action = New-ScheduledTaskAction -Execute $python -Argument $arguments -WorkingDirectory $target
     $trigger = New-ScheduledTaskTrigger -AtStartup
+    $principal = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\$accountName" -LogonType Password -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-    $task = New-ScheduledTask -Action $action -Trigger $trigger -Settings $settings
+    $task = New-ScheduledTask -Action $action -Principal $principal -Trigger $trigger -Settings $settings
     Register-ScheduledTask -TaskName $taskName -InputObject $task -User "$env:COMPUTERNAME\$accountName" -Password $password | Out-Null
     $taskCreated = $true
     $password = $null
@@ -82,6 +84,16 @@ try {
     New-NetFirewallRule -Name $ruleName -DisplayName 'Oasis LAN HTTPS (private subnet only)' -Direction Inbound -Action Allow -Profile Private -InterfaceAlias $InterfaceAlias -Protocol TCP -LocalAddress $ListenAddress -LocalPort $Port -RemoteAddress $AllowedSubnet -Program $python -EdgeTraversalPolicy Block | Out-Null
     $ruleCreated = $true
     Start-ScheduledTask -TaskName $taskName
+    $ready = $false
+    $deadline = (Get-Date).AddSeconds(45)
+    while ((Get-Date) -lt $deadline) {
+        $connection = New-Object Net.Sockets.TcpClient
+        try {
+            if ($connection.ConnectAsync($ListenAddress, $Port).Wait(500) -and $connection.Connected) { $ready = $true; break }
+        } catch {} finally { $connection.Dispose() }
+        Start-Sleep -Milliseconds 500
+    }
+    if (-not $ready) { throw 'Service did not start. Inspect the private logs/backend.log file.' }
     [pscustomobject]@{Url="https://${ListenAddress}:$Port";Account=$accountName;Task=$taskName;InstallPath=$target;FirewallSubnet=$AllowedSubnet} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $target 'installation-info.json') -Encoding UTF8
     Write-Host "Installed. Open https://${ListenAddress}:$Port on a trusted LAN device."
     Write-Host "Access code: run $target\show-access-code.ps1 locally."

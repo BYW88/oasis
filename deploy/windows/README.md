@@ -43,8 +43,10 @@ runtime/bin/chromedriver.exe 与 Chrome 对应的官方驱动
 runtime/bin/ffmpeg.exe        FFmpeg
 initialize_lan.py
 lan_server.py
+service_entry.py
 windows_limits.py
 install-lan.ps1
+grant-batch-logon.ps1
 show-access-code.ps1
 rotate-access-code.ps1
 stop-lan.ps1
@@ -70,10 +72,10 @@ bundle-manifest.json          源码/运行时文件的 SHA-256 清单
 
 1. 验证包中清单记录的文件摘要，并检查没有同名安装/账户/任务。
 2. 安装至 `%ProgramData%\OasisLAN`，创建 `OasisSvc` 普通账户。随机账户密码只交给 Windows 计划任务保存，不写入文本文件。
-3. 服务账户对程序只有读取/执行权限，对 `data/`、`logs/` 有写入权限；指定的日常账户只能读取安装目录。
+3. 服务账户对程序只有读取/执行权限，对 `data/`、`logs/` 有写入权限；指定的日常账户只能读取安装目录。仅给服务账户追加“作为批处理作业登录”权限，不授予管理员权限。
 4. 在目标机器生成自签名证书、私钥和存取码，不复制构建机器上的私密数据。
 5. 将指定网络接口标记为 Private，并只对指定接口/IP/子网开放 TCP 8443；不会开放 8000 或 3031。
-6. 注册开机启动计划任务 `OasisLAN`，以普通账户立即启动。Next.js 仅监听 `127.0.0.1:3031`。
+6. 注册开机启动计划任务 `OasisLAN`，以普通账户立即启动，并确认端口就绪后才报告安装完成。Next.js 仅监听 `127.0.0.1:3031`。启动错误保存在受目录权限保护的 `logs/backend.log`，存取码不写入服务日志。
 
 首次用手机访问 `https://<局域网IP>:8443` 时需要确认自签名证书。应先在本机核对证书 SHA-256 指纹，不要忽略其他网站的证书错误。证书有效期一年；IP 变化时要更新监听、证书和防火墙规则。建议在路由器配置 DHCP 地址保留。
 

@@ -214,7 +214,10 @@ def _init_db():
         auth.enable()
     if not auth.has_code():
         raise RuntimeError('無法保存存取碼，拒絕啟動服務')
-    auth.print_code()
+    if os.environ.get('OASIS_SELF_HOSTED') == '1':
+        print('   存取碼請在本機使用管理工具查看，不寫入服務日誌。')
+    else:
+        auth.print_code()
     _resume_pending_downloads()
     asyncio.create_task(_bg_check_analyses())
     asyncio.create_task(_backfill_covers())
